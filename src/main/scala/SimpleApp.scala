@@ -5,7 +5,7 @@ object SimpleApp {
   def main(args: Array[String]): Unit = {
     
     val spark = SparkSession.builder
-      .appName("TP Spark - Partie 3")
+      .appName("TP Spark - Final")
       .config("spark.hadoop.user.name", "hadoop")
       .master("local[*]")
       .getOrCreate()
@@ -103,8 +103,28 @@ object SimpleApp {
     println("\nSchéma final après Feature Engineering :")
     dfWithText.printSchema()
 
+    // --- 4. Traitement des valeurs nulles ---
+    println("\n--- Traitement des valeurs nulles ---")
+    val dfFinal = dfWithText.na.fill(-1, Seq("days_campaign", "hours_prepa", "goal"))
+                             .na.fill("unknown", Seq("country2", "currency2"))
+
+    println("Extrait du DataFrame final (après traitement des null) :")
+    dfFinal.show(5, false)
+    
+    println("\nSchéma final :")
+    dfFinal.printSchema()
+
+    // --- 5. Sauvegarde du DataFrame ---
+    val outputPath = "data/kickstarter_preprocessed"
+    println(s"\n--- Sauvegarde du DataFrame final au format Parquet dans : $outputPath ---")
+    dfFinal.write
+      .mode("overwrite") // Écrase le dossier s'il existe déjà
+      .parquet(outputPath)
+    
+    println("Sauvegarde terminée avec succès !")
+
     // On arrête la session Spark
     spark.stop()
-    println("\n👋 Fin de la Partie 3. Session Spark arrêtée. 👋")
+    println("\n👋 Fin du TP. Session Spark arrêtée. 👋")
   }
 }
