@@ -1,5 +1,6 @@
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions.{col, udf, unix_timestamp, to_timestamp, datediff, round, lower, concat_ws}
+import org.apache.spark.sql.functions.{col, udf, unix_timestamp, to_timestamp, datediff, round, lower, concat_ws, expr}
+import org.apache.spark.sql.types.IntegerType
 
 object SimpleApp {
   def main(args: Array[String]): Unit = {
@@ -14,12 +15,20 @@ object SimpleApp {
     println("--- Chargement et préparation initiale ---")
     val df = spark.read
       .option("header", "true")
-      .option("inferSchema", "true")
-      .csv("data/train_clean.csv")
+      .option("quote", "\"")
+      .option("escape", "\"")
+      .csv("data/train.csv")
 
+    println(s"1.1. Nombre de lignes: ${df.count()}")
+    println(s"1.2. Nombre de colonnes: ${df.columns.length}")
+    println("1.3. Extrait du DataFrame brut :")
+    df.show(5)
+
+    // 1.4. Conversion de types (Casting)
+    // On utilise try_cast pour éviter les erreurs sur les lignes mal formées
     val dfCasted = df
-      .withColumn("goal", col("goal").cast("integer"))
-      .withColumn("final_status", col("final_status").cast("integer"))
+      .withColumn("goal", expr("try_cast(goal as int)"))
+      .withColumn("final_status", expr("try_cast(final_status as int)"))
     
     println("Schéma initial après casting :")
     dfCasted.printSchema()
@@ -73,39 +82,45 @@ object SimpleApp {
 
     // 3.1. Calcul de la durée de la campagne en jours
     println("3.1. Création de la colonne 'days_campaign'...")
-    val dfWithDays = dfFiltered.withColumn("days_campaign", 
-      datediff(to_timestamp(col("deadline")), to_timestamp(col("launched_at")))
-    )
+    val dfWithDays = dfFiltered.withColumn("deadline_ts", to_timestamp(expr("try_cast(deadline as long)")))
+      .withColumn("launched_at_ts", to_timestamp(expr("try_cast(launched_at as long)")))
+      .withColumn("created_at_ts", to_timestamp(expr("try_cast(created_at as long)")))
+      .withColumn("days_campaign", 
+        datediff(col("deadline_ts"), col("launched_at_ts"))
+      )
 
     // 3.2. Calcul du temps de préparation en heures
     println("3.2. Création de la colonne 'hours_prepa'...")
     val dfWithHours = dfWithDays.withColumn("hours_prepa", 
-      round((unix_timestamp(col("launched_at")) - unix_timestamp(col("created_at"))) / 3600, 3)
+      (col("launched_at_ts").cast("long") - col("created_at_ts").cast("long")) / 3600
     )
 
-    // 3.3. Suppression des colonnes de date originales
+    // 3.3. Suppression des colonnes de date originales...
     println("3.3. Suppression des colonnes de date originales...")
-    val dfDatesCleaned = dfWithHours.drop("launched_at", "created_at", "deadline")
-    
-    // 3.4. Création de la colonne 'text'
+    val df_dates_cleaned = dfWithHours.drop("deadline", "created_at", "launched_at", "deadline_ts", "launched_at_ts", "created_at_ts")
+
+    // 3.4. Création de la colonne 'text' par concaténation...
     println("3.4. Création de la colonne 'text' par concaténation...")
-    val dfWithText = dfDatesCleaned.withColumn("text", 
-      concat_ws(" ", 
-        lower(col("name")), 
-        lower(col("desc")), 
-        lower(col("keywords"))
+    val df_with_text = df_dates_cleaned
+      .withColumn("name", lower(col("name")))
+      .withColumn("desc", lower(col("desc")))
+      .withColumn("text", 
+        concat_ws(" ", 
+          lower(col("name")), 
+          lower(col("desc")), 
+          lower(col("keywords"))
+        )
       )
-    )
 
     println("\nExtrait du DataFrame après Feature Engineering (focus sur les nouvelles colonnes) :")
-    dfWithText.select("days_campaign", "hours_prepa", "text").show(5, false)
+    df_with_text.select("days_campaign", "hours_prepa", "text").show(5, false)
 
     println("\nSchéma final après Feature Engineering :")
-    dfWithText.printSchema()
+    df_with_text.printSchema()
 
     // --- 4. Traitement des valeurs nulles ---
     println("\n--- Traitement des valeurs nulles ---")
-    val dfFinal = dfWithText.na.fill(-1, Seq("days_campaign", "hours_prepa", "goal"))
+    val dfFinal = df_with_text.na.fill(-1, Seq("days_campaign", "hours_prepa", "goal"))
                              .na.fill("unknown", Seq("country2", "currency2"))
 
     println("Extrait du DataFrame final (après traitement des null) :")
