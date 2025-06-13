@@ -1,11 +1,11 @@
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.functions.{col, udf} // Ajout de 'udf'
+import org.apache.spark.sql.functions.{col, udf, unix_timestamp, to_timestamp, datediff, round, lower, concat_ws}
 
 object SimpleApp {
   def main(args: Array[String]): Unit = {
     
     val spark = SparkSession.builder
-      .appName("TP Spark - Partie 2")
+      .appName("TP Spark - Partie 3")
       .config("spark.hadoop.user.name", "hadoop")
       .master("local[*]")
       .getOrCreate()
@@ -68,8 +68,43 @@ object SimpleApp {
     println("\nSchéma final après cleaning :")
     dfFiltered.printSchema()
 
+    // --- 3. Feature Engineering ---
+    println("\n--- Début du Feature Engineering ---")
+
+    // 3.1. Calcul de la durée de la campagne en jours
+    println("3.1. Création de la colonne 'days_campaign'...")
+    val dfWithDays = dfFiltered.withColumn("days_campaign", 
+      datediff(to_timestamp(col("deadline")), to_timestamp(col("launched_at")))
+    )
+
+    // 3.2. Calcul du temps de préparation en heures
+    println("3.2. Création de la colonne 'hours_prepa'...")
+    val dfWithHours = dfWithDays.withColumn("hours_prepa", 
+      round((unix_timestamp(col("launched_at")) - unix_timestamp(col("created_at"))) / 3600, 3)
+    )
+
+    // 3.3. Suppression des colonnes de date originales
+    println("3.3. Suppression des colonnes de date originales...")
+    val dfDatesCleaned = dfWithHours.drop("launched_at", "created_at", "deadline")
+    
+    // 3.4. Création de la colonne 'text'
+    println("3.4. Création de la colonne 'text' par concaténation...")
+    val dfWithText = dfDatesCleaned.withColumn("text", 
+      concat_ws(" ", 
+        lower(col("name")), 
+        lower(col("desc")), 
+        lower(col("keywords"))
+      )
+    )
+
+    println("\nExtrait du DataFrame après Feature Engineering (focus sur les nouvelles colonnes) :")
+    dfWithText.select("days_campaign", "hours_prepa", "text").show(5, false)
+
+    println("\nSchéma final après Feature Engineering :")
+    dfWithText.printSchema()
+
     // On arrête la session Spark
     spark.stop()
-    println("\n👋 Fin de la Partie 2. Session Spark arrêtée. 👋")
+    println("\n👋 Fin de la Partie 3. Session Spark arrêtée. 👋")
   }
 }
